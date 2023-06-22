@@ -348,18 +348,9 @@ class AWSSNSSQSTransport(Invoker):
                 envelope_kwargs_validation_func(**parser_kwargs)
 
         _callback_kwargs: Any = callback_kwargs
-        values = inspect.getfullargspec(func)
+        signature = inspect.signature(func)
         if not _callback_kwargs:
-            _callback_kwargs = (
-                {
-                    k: values.defaults[i - len(values.args) + 1]
-                    if values.defaults and i >= len(values.args) - len(values.defaults) - 1
-                    else None
-                    for i, k in enumerate(values.args[1:])
-                }
-                if values.args and len(values.args) > 1
-                else {}
-            )
+            _callback_kwargs = _collect_kwargs_from_signature(signature)
         else:
             _callback_kwargs = {k: None for k in _callback_kwargs if k != "self"}
         original_kwargs = {k: v for k, v in _callback_kwargs.items()}
@@ -474,18 +465,18 @@ class AWSSNSSQSTransport(Invoker):
                     if "approximate_receive_count" in _callback_kwargs:
                         kwargs["approximate_receive_count"] = approximate_receive_count
 
-                if len(values.args[1:]) and values.args[1] in kwargs:
-                    del kwargs[values.args[1]]
+                if len(signature.args[1:]) and signature.args[1] in kwargs:
+                    del kwargs[signature.args[1]]
 
             @functools.wraps(func)
             async def routine_func(*a: Any, **kw: Any) -> Any:
-                if not message_envelope and len(values.args[1:]) and len(values.args[2:]) == len(a):
+                if not message_envelope and len(signature.args[1:]) and len(signature.args[2:]) == len(a):
                     routine = func(*(obj, message, *a))
-                elif not message_envelope and len(values.args[1:]) and len(merge_dicts(kwargs, kw)):
+                elif not message_envelope and len(signature.args[1:]) and len(merge_dicts(kwargs, kw)):
                     routine = func(*(obj, message, *a), **merge_dicts(kwargs, kw))
                 elif len(merge_dicts(kwargs, kw)):
                     routine = func(*(obj, *a), **merge_dicts(kwargs, kw))
-                elif len(values.args[1:]):
+                elif len(signature.args[1:]):
                     routine = func(*(obj, message, *a), **kw)
                 else:
                     routine = func(*(obj, *a), **kw)
@@ -592,7 +583,6 @@ class AWSSNSSQSTransport(Invoker):
         overwrite_attributes: bool = True,
         fifo: bool = False,
     ) -> str:
-
         cls.validate_topic_name(topic)
 
         if not cls.topics:
@@ -1823,3 +1813,10 @@ def aws_sns_sqs(
             **kwargs,
         ),
     )
+
+
+def _collect_kwargs_from_signature(signature: inspect.Signature) -> dict:
+    return {
+        name: param.default if param.default is not inspect.Parameter.empty else None
+        for name, param in signature.parameters.items()
+    }
